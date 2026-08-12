@@ -36,14 +36,15 @@ def client(monkeypatch):
     Base.metadata.create_all(db_mod.get_engine())
     sb = db_mod.get_supabase()
     yield sb
-    # Clean up any rows this module created (names are uuid-prefixed).
-    for tbl in ("week_signatures", "menu_history"):
-        sb.table(tbl).delete().gte("client_name", "adaptertest-").lte(
-            "client_name", "adaptertest-~"
-        ).execute()
-    sb.table("clients").delete().gte("name", "adaptertest-").lte(
-        "name", "adaptertest-~"
-    ).execute()
+    # Clean up rows this module created. Collation-independent: find them in
+    # Python by prefix (a string range with `~` misbehaves under en_US.utf8)
+    # and delete by exact name.
+    rows = sb.table("clients").select("name").execute().data or []
+    names = [r["name"] for r in rows if str(r["name"]).startswith("adaptertest-")]
+    for name in names:
+        for tbl in ("week_signatures", "menu_history"):
+            sb.table(tbl).delete().eq("client_name", name).execute()
+        sb.table("clients").delete().eq("name", name).execute()
     db_mod.reset_db_singletons_for_tests()
 
 
@@ -125,19 +126,26 @@ def test_delete_returns_deleted_rows(client):
 
 
 def test_order_and_limit(client):
-    # Isolate to a unique prefix so any leftover `adaptertest-` rows from other
-    # tests in this module can't affect the "first by name" assertion.
-    prefix = f"adaptertest-{uuid.uuid4().hex[:8]}-"
-    a, b = prefix + "a", prefix + "b"
+    # Collation-agnostic: filter by exact membership (`.in_`, not a string
+    # range — `~`/`-` collate differently under C vs en_US.utf8), and verify
+    # order via asc-vs-desc rather than assuming a specific sort order. This
+    # holds under any database collation.
+    a, b = _name(), _name()
     client.table("clients").insert([
         {"name": a, "counters": []}, {"name": b, "counters": []},
     ]).execute()
-    rows = (
-        client.table("clients").select("name")
-        .gte("name", prefix).lte("name", prefix + "~")
+
+    first = (
+        client.table("clients").select("name").in_("name", [a, b])
         .order("name").limit(1).execute().data
     )
-    assert rows and rows[0]["name"] == a
+    last = (
+        client.table("clients").select("name").in_("name", [a, b])
+        .order("name", desc=True).limit(1).execute().data
+    )
+    assert len(first) == 1 and len(last) == 1        # limit(1) honoured
+    assert first[0]["name"] != last[0]["name"]       # asc and desc differ
+    assert {first[0]["name"], last[0]["name"]} == {a, b}
 
 
 def test_unknown_table_and_column_error_shapes(client):
