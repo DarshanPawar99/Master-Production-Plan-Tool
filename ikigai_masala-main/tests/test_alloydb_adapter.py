@@ -125,13 +125,17 @@ def test_delete_returns_deleted_rows(client):
 
 
 def test_order_and_limit(client):
-    a, b = sorted([_name(), _name()])
+    # Isolate to a unique prefix so any leftover `adaptertest-` rows from other
+    # tests in this module can't affect the "first by name" assertion.
+    prefix = f"adaptertest-{uuid.uuid4().hex[:8]}-"
+    a, b = prefix + "a", prefix + "b"
     client.table("clients").insert([
         {"name": a, "counters": []}, {"name": b, "counters": []},
     ]).execute()
     rows = (
         client.table("clients").select("name")
-        .gte("name", "adaptertest-").order("name").limit(1).execute().data
+        .gte("name", prefix).lte("name", prefix + "~")
+        .order("name").limit(1).execute().data
     )
     assert rows and rows[0]["name"] == a
 
