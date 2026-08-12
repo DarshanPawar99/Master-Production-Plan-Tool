@@ -26,25 +26,27 @@ import streamlit as st
 
 
 def _bridge_streamlit_secrets() -> None:
-    """Copy Supabase credentials out of ``st.secrets`` into the environment.
+    """Copy AlloyDB connection settings out of ``st.secrets`` into the environment.
 
-    Streamlit-hosted deployments supply credentials via
-    ``.streamlit/secrets.toml``, and ``src/db.py`` used to read ``st.secrets``
-    itself — which made the database singleton import a UI framework, so the
-    domain could not be used without Streamlit installed. Reading them here
-    instead keeps that deployment working with the dependency pointing the right
-    way: the interface knows about its own host, and ``src/`` only reads env.
+    Streamlit-hosted deployments may supply connection details via
+    ``.streamlit/secrets.toml``. ``src/`` reads only the environment (never
+    ``st.secrets``), so the domain can be used without Streamlit installed —
+    the interface knows about its own host and bridges the values down here.
 
-    Secrets win over pre-existing environment variables, preserving the old
-    precedence (``st.secrets`` was tried first). Must run before anything touches
-    the database — hence at import, above the modules that do.
+    Bridges any of the AlloyDB connection knobs the secrets helper understands
+    (a full ``DATABASE_URL``, or the ``DB_*`` / ``EMULATE_LOCAL`` / ``GCP_PROJECT``
+    pieces). Secrets win over pre-existing environment variables. Must run before
+    anything touches the database — hence at import, above the modules that do.
     """
-    for name in ('SUPABASE_URL', 'SUPABASE_KEY'):
+    for name in (
+        'DATABASE_URL', 'EMULATE_LOCAL', 'GCP_PROJECT', 'SECRETS_YAML',
+        'DB_USER', 'DB_PASS', 'DB_HOST', 'DB_PORT', 'DB_NAME',
+    ):
         try:
             value = st.secrets[name]
         except Exception:
             continue          # no secrets.toml, or key absent → env is the source
-        if value:
+        if value != "" and value is not None:
             os.environ[name] = str(value)
 
 

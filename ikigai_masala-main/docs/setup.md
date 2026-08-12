@@ -9,9 +9,13 @@ this file has the full story.
 ## 1. Prerequisites
 
 - Python 3.10+
-- A Supabase project (URL + service-role key)
-- The schema applied once (see [Supabase schema](#3-supabase-schema))
-- Secrets: `SUPABASE_URL`, `SUPABASE_KEY`
+- An AlloyDB / PostgreSQL database named `menu_engineering`
+- The schema applied once (see [Database schema](#3-database-schema))
+- A connection source: `DATABASE_URL`, or `EMULATE_LOCAL=True` + `secrets.yaml`,
+  or `GCP_PROJECT` (Secret Manager) — see [Secrets](#4-secrets)
+
+> Migrating from Supabase? See [docs/alloydb_migration.md](alloydb_migration.md)
+> for what changed (schema and features are unchanged; only the connection).
 
 ---
 
@@ -25,54 +29,76 @@ pip install -r requirements-dev.txt   # runtime + pytest + ruff + bandit
 
 ---
 
-## 3. Supabase schema
+## 3. Database schema
 
 The whole schema is **four tables**: `clients`, `app_settings`, `menu_history`,
 `week_signatures`. A client's entire cuisine config is one JSON document in
-`clients.counters` (plus a `city` column); menu history is one JSON row per
-`(client, service_date)`.
+`clients.counters` (plus `city` and the other per-client columns); menu history
+is one JSON row per `(client, service_date)`.
 
-In the Supabase SQL editor, run the master script once. It's idempotent
-(`CREATE TABLE IF NOT EXISTS` / `ADD COLUMN IF NOT EXISTS`) and also migrates an
-older normalized database (folds the legacy `menu_categories` /
+Run the setup script once against the `menu_engineering` database. It's
+idempotent (`CREATE TABLE IF NOT EXISTS` / `ADD COLUMN IF NOT EXISTS`):
+
+```bash
+psql "$DATABASE_URL" -f scripts/alloydb_setup.sql
+# or paste scripts/alloydb_setup.sql into AlloyDB Studio
+```
+
+`scripts/setup_all.sql` is the equivalent Supabase-editor script and additionally
+migrates an older normalized database (folds the legacy `menu_categories` /
 `slot_count_overrides` / `theme_overrides` tables into `clients.counters` and
-reshapes the old per-dish `menu_history`):
-
-```
-scripts/setup_all.sql   master schema + migrations
-```
+reshapes the old per-dish `menu_history`).
 
 ---
 
 ## 4. Secrets
 
-The app reads secrets from `.streamlit/secrets.toml` locally (or the Secrets
-panel on Streamlit Cloud). Both values are required; the API fails at
-startup if either is missing.
+The AlloyDB connection is resolved from the first source available, in order:
 
-```toml
-SUPABASE_URL = "https://<your-project-ref>.supabase.co"
-SUPABASE_KEY = "<service_role / sb_secret_... key — NOT publishable>"
-```
+1. **`DATABASE_URL`** — a full SQLAlchemy URL, used verbatim (simplest for local
+   dev / scripts / CI):
 
-### Key-class notes
+   ```bash
+   export DATABASE_URL="postgresql+pg8000://user:pass@host:5432/menu_engineering"
+   ```
 
-- **`SUPABASE_KEY` must be the service-role key** (`sb_secret_...` or the
-  legacy JWT `eyJ...`). The publishable / anon key obeys RLS and will block
-  the backend from writing history.
-- Never commit the secret. Rotate immediately if it leaks.
+2. **Local mode** — `EMULATE_LOCAL=True` reads `secrets.yaml` (copy
+   `secrets.example.yaml` → `secrets.yaml`, git-ignored), or falls back to
+   `DB_USER`/`DB_PASS`/`DB_HOST`/`DB_PORT`/`DB_NAME` env vars:
+
+   ```yaml
+   # secrets.yaml
+   db:
+     user: postgres
+     pass: postgres
+     host: 127.0.0.1
+     port: 5432
+     name: menu_engineering
+   ```
+
+3. **Cloud** — leave `EMULATE_LOCAL` unset and set `GCP_PROJECT`; the DB creds
+   come from the GCP Secret Manager secret `db-connection-config` (a JSON object
+   with `user/pass/host/port/name`).
+
+A Streamlit `.streamlit/secrets.toml` deployment still works — any of
+`DATABASE_URL`, `EMULATE_LOCAL`, `GCP_PROJECT`, or the `DB_*` keys placed there
+are bridged into the environment at startup.
+
+- Never commit `secrets.yaml` or real credentials. Rotate immediately if leaked.
 
 ### Optional env vars
 
 ```toml
-APP_TIMEZONE             = "Asia/Kolkata"   # default; any IANA name
-LOG_FORMAT               = "json"           # structured logs for prod
-LOG_LEVEL                = "INFO"
-APP_VERSION              = "$(git rev-parse --short HEAD)"   # surfaced in /health + /
-SUPABASE_TIMEOUT_SECONDS = "5"              # bound on every Supabase read/write; default 5s
-CORS_ALLOWED_ORIGINS     = "https://prod.example.com"   # comma-separated; defaults to loopback only
-API_HOST                 = "127.0.0.1"      # loopback. Containers / prod may want 0.0.0.0
-API_PORT                 = "5000"
+APP_TIMEZONE               = "Asia/Kolkata"   # default; any IANA name
+LOG_FORMAT                 = "json"           # structured logs for prod
+LOG_LEVEL                  = "INFO"
+APP_VERSION                = "$(git rev-parse --short HEAD)"   # surfaced in /health + /
+DB_STATEMENT_TIMEOUT_SECONDS = "30"           # slow-query hint; default 30s
+SOLVER_GATE_ENABLED        = "false"          # solve concurrency gate; disabled by default
+SOLVER_WORKERS             = "9"              # CP-SAT workers per solve when the gate is off
+CORS_ALLOWED_ORIGINS       = "https://prod.example.com"   # comma-separated; defaults to loopback only
+API_HOST                   = "127.0.0.1"      # loopback. Containers / prod may want 0.0.0.0
+API_PORT                   = "5000"
 ```
 
 `APP_TIMEZONE` decides what "today" means when the client doesn't pass an
@@ -89,7 +115,7 @@ streamlit run app.py
 ```
 
 The Streamlit process auto-spawns the Flask API in a daemon thread on
-`http://localhost:5000`. Both talk to the same Supabase project.
+`http://localhost:5000`. Both talk to the same AlloyDB database.
 
 To run the API standalone (e.g. under gunicorn):
 

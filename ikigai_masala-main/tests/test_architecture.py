@@ -137,26 +137,32 @@ class TestSettingsIsTheSharedLeaf:
         assert 'src' not in roots
 
     def test_api_config_reexports_rather_than_redefining(self):
-        """One source of truth for the Supabase timeout. Two `os.getenv` calls
-        with the same default in two files drift the moment one changes."""
-        from api.config import SUPABASE_TIMEOUT_SECONDS as via_api
-        from src.settings import SUPABASE_TIMEOUT_SECONDS as via_src
+        """One source of truth for the DB statement-timeout setting. Two
+        `os.getenv` calls with the same default in two files drift the moment
+        one changes."""
+        from api.config import DB_STATEMENT_TIMEOUT_SECONDS as via_api
+        from src.settings import DB_STATEMENT_TIMEOUT_SECONDS as via_src
         assert via_api is via_src
 
-    def test_credentials_come_from_the_environment(self, monkeypatch):
-        from src.settings import resolve_supabase_credentials
-        monkeypatch.setenv('SUPABASE_URL', 'https://example.supabase.co')
-        monkeypatch.setenv('SUPABASE_KEY', 'k')
-        assert resolve_supabase_credentials() == (
-            'https://example.supabase.co', 'k')
+    def test_db_credentials_are_resolved_below_the_interfaces(self):
+        """The AlloyDB connection string is resolved by the secrets helper,
+        which — like the old Supabase-credential resolver — imports nothing from
+        api/ui/streamlit. The connection indirection stays below the
+        interfaces."""
+        from utils import secrets_manager_helper as smh
+        roots = _imported_roots(smh.__file__)
+        assert not (roots & INTERFACE_PACKAGES)
 
-    def test_missing_credentials_fail_loudly(self, monkeypatch):
-        """Rather than building a client that 401s on every later call."""
-        from src.settings import resolve_supabase_credentials
-        monkeypatch.delenv('SUPABASE_URL', raising=False)
-        monkeypatch.delenv('SUPABASE_KEY', raising=False)
-        with pytest.raises(KeyError):
-            resolve_supabase_credentials()
+    def test_database_url_override_is_honoured(self, monkeypatch):
+        """A full DATABASE_URL is used verbatim — the escape hatch tests and
+        one-off scripts rely on (no Secret Manager / YAML round trip)."""
+        from utils.secrets_manager_helper import SecretsManagerHelper
+        monkeypatch.setenv(
+            'DATABASE_URL', 'postgresql+pg8000://u:p@h:5432/menu_engineering')
+        assert (
+            SecretsManagerHelper.get_db_connection_string()
+            == 'postgresql+pg8000://u:p@h:5432/menu_engineering'
+        )
 
 
 class TestWorkerCountIsInjectedNotImported:

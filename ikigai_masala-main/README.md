@@ -7,26 +7,32 @@ per-client customizations, and history.
 - **Frontend:** Streamlit
 - **Backend:** Flask API (auto-started by Streamlit on port 5000)
 - **Solver:** Google OR-Tools CP-SAT
-- **Database:** Supabase (PostgreSQL) — clients, history, config
+- **Database:** AlloyDB / PostgreSQL (SQLAlchemy + pg8000) — clients, history, config
 
 ---
 
 ## Quick start
 
-> First-time setup: run `scripts/setup_all.sql` once in the Supabase SQL
-> editor (the master idempotent schema) — see [docs/setup.md](docs/setup.md).
+> First-time setup: run `scripts/alloydb_setup.sql` once against the
+> `menu_engineering` database (the idempotent schema) — see
+> [docs/setup.md](docs/setup.md).
 
 ```bash
 cd ikigai_masala-main
 pip install -r requirements-dev.txt
 
-# one-time in the Supabase SQL editor:
-#   scripts/setup_all.sql   (master schema + migrations, idempotent)
+# one-time, against the menu_engineering database:
+#   psql "$DATABASE_URL" -f scripts/alloydb_setup.sql
+#   (or paste it into AlloyDB Studio)
 
-cat > .streamlit/secrets.toml <<EOF
-SUPABASE_URL = "https://<your-project>.supabase.co"
-SUPABASE_KEY = "<service_role key>"
-EOF
+# Local dev: point at any Postgres/AlloyDB. Two equivalent ways —
+#   a) a full URL:
+export DATABASE_URL="postgresql+pg8000://user:pass@host:5432/menu_engineering"
+#   b) or EMULATE_LOCAL + a secrets.yaml (copy secrets.example.yaml):
+#      export EMULATE_LOCAL=True
+#
+# In the cloud: leave EMULATE_LOCAL unset and set GCP_PROJECT — the DB creds
+# come from the Secret Manager secret `db-connection-config`.
 
 streamlit run app.py
 ```

@@ -1,47 +1,51 @@
-"""Tests for api.config.validate_required_env."""
+"""Tests for api.config.validate_required_env (AlloyDB connection sources)."""
 
 import pytest
 
-from api.config import REQUIRED_ENV_VARS, validate_required_env
+from api.config import validate_required_env
+
+# The three self-sufficient connection sources.
+_CONN_ENV = ("DATABASE_URL", "EMULATE_LOCAL", "GCP_PROJECT", "GOOGLE_CLOUD_PROJECT")
+
+
+def _clear(monkeypatch):
+    for name in _CONN_ENV:
+        monkeypatch.delenv(name, raising=False)
 
 
 class TestValidateRequiredEnv:
-    def test_passes_when_all_set(self, monkeypatch):
-        for name in REQUIRED_ENV_VARS:
-            monkeypatch.setenv(name, "x")
+    def test_raises_when_no_source_configured(self, monkeypatch):
+        _clear(monkeypatch)
+        with pytest.raises(RuntimeError) as exc:
+            validate_required_env()
+        msg = str(exc.value)
+        assert "DATABASE_URL" in msg
+        assert "EMULATE_LOCAL" in msg
+        assert "GCP_PROJECT" in msg
+
+    def test_database_url_is_sufficient(self, monkeypatch):
+        _clear(monkeypatch)
+        monkeypatch.setenv("DATABASE_URL", "postgresql+pg8000://u:p@h:5432/db")
         validate_required_env()  # no raise
 
-    def test_raises_listing_every_missing_var(self, monkeypatch):
-        for name in REQUIRED_ENV_VARS:
-            monkeypatch.delenv(name, raising=False)
-        with pytest.raises(RuntimeError) as exc:
-            validate_required_env()
-        msg = str(exc.value)
-        for name in REQUIRED_ENV_VARS:
-            assert name in msg, f"error message should name {name}"
+    def test_emulate_local_is_sufficient(self, monkeypatch):
+        _clear(monkeypatch)
+        monkeypatch.setenv("EMULATE_LOCAL", "True")
+        validate_required_env()  # no raise
 
-    def test_empty_string_counts_as_missing(self, monkeypatch):
-        for name in REQUIRED_ENV_VARS:
-            monkeypatch.setenv(name, "x")
-        monkeypatch.setenv("SUPABASE_KEY", "")
-        with pytest.raises(RuntimeError) as exc:
-            validate_required_env()
-        assert "SUPABASE_KEY" in str(exc.value)
+    def test_gcp_project_is_sufficient(self, monkeypatch):
+        _clear(monkeypatch)
+        monkeypatch.setenv("GCP_PROJECT", "my-project")
+        validate_required_env()  # no raise
 
-    def test_whitespace_only_counts_as_missing(self, monkeypatch):
-        for name in REQUIRED_ENV_VARS:
-            monkeypatch.setenv(name, "x")
-        monkeypatch.setenv("SUPABASE_URL", "   ")
-        with pytest.raises(RuntimeError) as exc:
+    def test_whitespace_only_does_not_count(self, monkeypatch):
+        _clear(monkeypatch)
+        monkeypatch.setenv("DATABASE_URL", "   ")
+        with pytest.raises(RuntimeError):
             validate_required_env()
-        assert "SUPABASE_URL" in str(exc.value)
 
-    def test_error_names_only_missing_vars(self, monkeypatch):
-        for name in REQUIRED_ENV_VARS:
-            monkeypatch.setenv(name, "x")
-        monkeypatch.delenv("SUPABASE_KEY", raising=False)
-        with pytest.raises(RuntimeError) as exc:
+    def test_emulate_local_false_is_not_a_source(self, monkeypatch):
+        _clear(monkeypatch)
+        monkeypatch.setenv("EMULATE_LOCAL", "False")
+        with pytest.raises(RuntimeError):
             validate_required_env()
-        msg = str(exc.value)
-        assert "SUPABASE_KEY" in msg
-        assert "SUPABASE_URL" not in msg

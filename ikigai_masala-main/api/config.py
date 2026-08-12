@@ -82,12 +82,9 @@ DEBUG = os.getenv('DEBUG', 'false').lower() == 'true'
 APP_VERSION = os.getenv('APP_VERSION', 'dev')
 
 
-# Re-exported from src.settings, which is where settings the data layer needs
-# now live. Defined there rather than here because src/db.py must not import
-# from the web package to read it — it used to, via a lazy in-function import
-# with a comment admitting the cycle it was dodging. Kept as a name on
-# api.config so existing importers (and the health endpoint) are unchanged.
-from src.settings import SUPABASE_TIMEOUT_SECONDS  # noqa: E402,F401
+# Kept below the interfaces in src.settings so src/db.py can read it without
+# importing the web package.
+from src.settings import DB_STATEMENT_TIMEOUT_SECONDS  # noqa: E402,F401
 
 
 # Timezone used to resolve "today" when the client doesn't pass an
@@ -136,19 +133,33 @@ def today_in_app_tz() -> dt.date:
 # Vars that the API and solver cannot operate without. Validated at
 # api.app import time so the process fails with a clear message instead
 # of crashing on the first request that needs Supabase.
-REQUIRED_ENV_VARS = ("SUPABASE_URL", "SUPABASE_KEY")
+# The AlloyDB connection is resolved by utils.secrets_manager_helper from one of
+# three self-sufficient sources, so there is no fixed list of required vars —
+# validate_required_env() checks that at least one source is configured.
+REQUIRED_ENV_VARS = ()
+
+
+def _emulate_local() -> bool:
+    return os.getenv("EMULATE_LOCAL", "False").lower() in ("1", "true", "yes")
 
 
 def validate_required_env() -> None:
-    """Raise RuntimeError listing every required env var that is unset
-    or empty. Reads os.environ live so test fixtures that set env in
-    conftest.py before importing api.app are honoured.
+    """Fail fast when no AlloyDB connection source is configured.
+
+    A connection can come from any one of: ``DATABASE_URL`` (full URL),
+    ``EMULATE_LOCAL=True`` (local ``secrets.yaml`` / ``DB_*`` env), or GCP
+    Secret Manager (needs ``GCP_PROJECT`` / ``GOOGLE_CLOUD_PROJECT``). Reads
+    os.environ live so conftest.py env set before importing api.app is honoured.
     """
-    missing = [name for name in REQUIRED_ENV_VARS if not os.getenv(name, "").strip()]
-    if missing:
-        raise RuntimeError(
-            "Missing required environment variables: "
-            + ", ".join(missing)
-            + ". Set them (e.g. in .streamlit/secrets.toml or the process env) "
-              "before starting the API."
-        )
+    if os.getenv("DATABASE_URL", "").strip():
+        return
+    if _emulate_local():
+        return
+    if os.getenv("GCP_PROJECT", "").strip() or os.getenv("GOOGLE_CLOUD_PROJECT", "").strip():
+        return
+    raise RuntimeError(
+        "AlloyDB connection is not configured. Set one of: DATABASE_URL "
+        "(full SQLAlchemy URL); EMULATE_LOCAL=True with a secrets.yaml or DB_* "
+        "env for local dev; or GCP_PROJECT for Secret Manager. See "
+        "secrets.example.yaml and docs/setup.md."
+    )

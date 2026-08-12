@@ -4,6 +4,10 @@ __pycache__/
 .env
 .streamlit/secrets.toml
 
+# Local AlloyDB/Postgres connection secrets (see config/secrets.example.yaml).
+secrets.yaml
+**/secrets.yaml
+
 # Tool caches (local only — regenerated on every run).
 .pytest_cache/
 .ruff_cache/

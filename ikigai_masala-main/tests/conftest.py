@@ -12,11 +12,11 @@ import pytest
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-# Seed dummy values for env vars that api.config.validate_required_env()
-# insists on at import time. Supabase is replaced by the FakeSupabase
-# fixture.
-os.environ.setdefault("SUPABASE_URL", "http://fake-supabase.invalid")
-os.environ.setdefault("SUPABASE_KEY", "fake-key-for-tests")
+# Satisfy api.config.validate_required_env() at import time without a real DB.
+# EMULATE_LOCAL is a self-sufficient connection source (local YAML / DB_* env),
+# and the actual DB is replaced per-test by the FakeSupabase fixture — which
+# monkeypatches src.db._sb_client, so no engine is ever built or connected here.
+os.environ.setdefault("EMULATE_LOCAL", "True")
 
 
 @pytest.fixture(scope="session")

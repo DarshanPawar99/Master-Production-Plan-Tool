@@ -8,6 +8,7 @@ Dynamic worker allocation tuned for 1 GB RAM:
 """
 
 import functools
+import os
 import threading
 from collections import deque
 
@@ -24,6 +25,21 @@ WORKERS_BY_LOAD = {      # active_count → CP-SAT workers per solve
 }
 DEFAULT_WORKERS = 2      # fallback (shouldn't happen with MAX_RUNNING=2)
 QUEUE_TIMEOUT = 300      # seconds a queued request waits before giving up
+
+# ---------------------------------------------------------------------------
+# Gate on/off switch
+# ---------------------------------------------------------------------------
+# The gate serialises solves (max 2 at once, others queue / 503) — the
+# "only-so-many-people-at-once" limiter. It is DISABLED by default: every
+# request runs immediately with a fixed worker budget. Re-enable it by setting
+# SOLVER_GATE_ENABLED=true (e.g. on a small single-instance box where two
+# simultaneous CP-SAT solves would exhaust RAM).
+GATE_ENABLED = os.getenv("SOLVER_GATE_ENABLED", "false").lower() in ("1", "true", "yes")
+
+# CP-SAT workers per solve when the gate is off (no active-load signal to size
+# by). Tune via SOLVER_WORKERS. Kept at the single-solve budget so ungated
+# solves still run at full quality.
+UNGATED_WORKERS = int(os.getenv("SOLVER_WORKERS", "9"))
 
 # ---------------------------------------------------------------------------
 # Internal state
@@ -44,14 +60,26 @@ def _workers_for_current_load() -> int:
 
 def get_worker_count() -> int:
     """Return the recommended CP-SAT worker count right now."""
+    if not GATE_ENABLED:
+        return UNGATED_WORKERS
     with _lock:
         return _workers_for_current_load()
 
 
 def get_stats() -> dict:
     """Snapshot of concurrency stats (exposed via /health)."""
+    if not GATE_ENABLED:
+        return {
+            "enabled": False,
+            "active_solves": 0,
+            "queued": 0,
+            "max_running": None,
+            "max_queued": None,
+            "workers_per_solve": UNGATED_WORKERS,
+        }
     with _lock:
         return {
+            "enabled": True,
             "active_solves": _running,
             "queued": len(_queue),
             "max_running": MAX_RUNNING,
@@ -70,6 +98,12 @@ def solver_gate(fn):
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
         global _running
+
+        # Gate disabled → run immediately, no queue, no cap. This is the
+        # default (SOLVER_GATE_ENABLED unset); the whole queue machinery below
+        # is skipped so any number of requests solve concurrently.
+        if not GATE_ENABLED:
+            return fn(*args, **kwargs)
 
         with _lock:
             if _running < MAX_RUNNING:

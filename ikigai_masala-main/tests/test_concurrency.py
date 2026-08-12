@@ -19,6 +19,9 @@ import api.concurrency as conc
 @pytest.fixture(autouse=True)
 def _reset_gate_state(monkeypatch):
     """Each test gets a clean gate with small limits so we can force races."""
+    # The gate ships disabled (SOLVER_GATE_ENABLED unset); these tests exercise
+    # the gate mechanism itself, so force it on for the duration.
+    monkeypatch.setattr(conc, "GATE_ENABLED", True)
     monkeypatch.setattr(conc, "_running", 0, raising=False)
     monkeypatch.setattr(conc, "_queue", conc.deque(), raising=False)
     monkeypatch.setattr(conc, "MAX_RUNNING", 1)

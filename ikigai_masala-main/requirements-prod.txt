@@ -1,0 +1,25 @@
+# Production API dependencies (e.g. Cloud Run) — no Streamlit UI.
+# Mirrors requirements.txt minus streamlit, plus gunicorn. The persistence
+# stack is AlloyDB (SQLAlchemy + pg8000 + GCP Secret Manager).
+
+# Data pipeline
+pandas>=2.0,<4.0
+numpy>=1.24,<3.0
+openpyxl>=3.1,<4.0
+
+# Solver
+ortools>=9.8,<10.0
+
+# Web / API
+flask>=3.0,<4.0
+flask-cors>=4.0,<7.0
+requests>=2.31,<3.0
+gunicorn>=22.0,<24.0
+
+# Persistence — AlloyDB (same stack as op-mis-backend)
+SQLAlchemy>=2.0,<3.0
+pg8000>=1.30,<2.0
+PyYAML>=6.0,<7.0
+google-cloud-secret-manager>=2.16,<3.0
+google-cloud-storage>=2.14,<4.0
+python-dotenv>=1.0,<2.0
