@@ -1,0 +1,24 @@
+{
+  "bangalore.xlsx": [
+    "amadeus",
+    "cloudera",
+    "computacenter",
+    "continental",
+    "healthineers",
+    "icon",
+    "infineon",
+    "zscalar"
+  ],
+  "chennai.xlsx": [],
+  "ncr.xlsx": [
+    "airtel noida",
+    "carelon",
+    "corning",
+    "junglee games",
+    "sael",
+    "siemens",
+    "sinch",
+    "stryker"
+  ],
+  "pune.xlsx": []
+}
