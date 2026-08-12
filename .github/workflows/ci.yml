@@ -1,0 +1,137 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  # Lets anyone with repo write access run the slow / integration job
+  # on demand from the Actions tab — e.g. before a release cut.
+  workflow_dispatch:
+
+# Cancel in-progress runs when a new commit lands on the same branch —
+# saves runner minutes and avoids "merge the old run's PR status" races.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: pytest
+    runs-on: ubuntu-latest
+    # A throwaway Postgres so the AlloyDB adapter integration tests
+    # (tests/test_alloydb_adapter.py) run for real — AlloyDB is
+    # Postgres-wire-compatible, so this exercises the exact SQL path
+    # production uses. They self-skip when TEST_DATABASE_URL is unset.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: menu_engineering
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            ikigai_masala-main/requirements.txt
+            ikigai_masala-main/requirements-dev.txt
+
+      - name: Install dependencies
+        working-directory: ikigai_masala-main
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      # Local `pytest` stays plain for fast iteration; CI runs coverage
+      # on every PR and fails if total line coverage drops below the floor.
+      # Bump the floor in .github/workflows/ci.yml when adding tests that
+      # durably raise it.
+      - name: Run tests with coverage gate
+        working-directory: ikigai_masala-main
+        env:
+          TEST_DATABASE_URL: postgresql+pg8000://postgres:postgres@localhost:5432/menu_engineering
+        run: pytest -q --cov --cov-report=term --cov-fail-under=82
+
+  lint:
+    name: ruff (bug-only ruleset)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install ruff
+        run: pip install "ruff>=0.4,<1.0"
+
+      # F = pyflakes (unused imports, undefined names, etc.)
+      # E9 = syntax errors / indentation errors
+      # Intentionally narrow so we catch real bugs without drowning in
+      # style noise on a codebase that was never formatted. Widen later.
+      - name: Run ruff
+        working-directory: ikigai_masala-main
+        run: ruff check --select=F,E9 .
+
+  security:
+    name: bandit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install bandit
+        run: pip install "bandit>=1.7,<2.0"
+
+      # -ll: only MEDIUM+ severity findings; -r: recursive.
+      # Scanning tests is noisy and uninteresting (assert statements etc.).
+      - name: Run bandit
+        working-directory: ikigai_masala-main
+        run: bandit -ll -r api src scripts
+
+  # Full-pipeline integration test: real Excel, real rules, 5-day solve.
+  # Not gated onto every PR because a cold solve costs ~30-60s; PR feedback
+  # loops stay fast on the unit/rule tests. Runs on push-to-main and
+  # manual dispatch so regressions surface before a release.
+  slow-tests:
+    name: pytest -m slow (integration)
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            ikigai_masala-main/requirements.txt
+            ikigai_masala-main/requirements-dev.txt
+
+      - name: Install dependencies
+        working-directory: ikigai_masala-main
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Run slow tests
+        working-directory: ikigai_masala-main
+        run: pytest -q -m slow

@@ -1,0 +1,34 @@
+# Runtime dependencies for Ikigai Masala.
+#
+# Pinning strategy: lower bound = version the code was written against,
+# upper bound = next major. This catches breaking changes without
+# forcing a lock-step upgrade for every patch release. Exact versions
+# are intentionally avoided so security patches can land without a
+# requirements.txt bump.
+
+# Data pipeline
+pandas>=2.0,<4.0
+numpy>=1.24,<3.0
+openpyxl>=3.1,<4.0
+
+# Solver
+ortools>=9.8,<10.0
+
+# Web / API
+flask>=3.0,<4.0
+flask-cors>=4.0,<7.0
+requests>=2.31,<3.0
+
+# Streamlit frontend
+streamlit>=1.30,<2.0
+
+# Persistence — AlloyDB (same stack as op-mis-backend)
+SQLAlchemy>=2.0,<3.0
+pg8000>=1.30,<2.0
+PyYAML>=6.0,<7.0
+# GCP integration (Secret Manager for the DB creds; storage for project
+# auto-detection). Optional at runtime: unused when EMULATE_LOCAL=True or
+# DATABASE_URL is set, and imported behind try/except.
+google-cloud-secret-manager>=2.16,<3.0
+google-cloud-storage>=2.14,<4.0
+python-dotenv>=1.0,<2.0
